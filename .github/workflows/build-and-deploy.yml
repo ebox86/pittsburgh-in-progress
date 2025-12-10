@@ -1,0 +1,73 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Login to GitHub Container Registry
+        run: echo "${{ secrets.PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Build and tag Docker image
+        env:
+          GHCR_REPOSITORY: ${{ github.repository }}
+        run: |
+          docker build -t ghcr.io/$GHCR_REPOSITORY:latest \
+            --build-arg NEXT_PUBLIC_MAPBOX_TOKEN=${{ secrets.NEXT_PUBLIC_MAPBOX_TOKEN }} .
+          docker push ghcr.io/$GHCR_REPOSITORY:latest
+
+  deploy-cloud-run:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up gcloud auth (Workload Identity Federation)
+        uses: google-github-actions/auth@v1
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account_email: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Install gcloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Write Cloud Run env vars from GitHub Secrets
+        run: |
+          cat > cloudrun.env <<EOF
+          NEXT_PUBLIC_MAPBOX_TOKEN=${{ secrets.NEXT_PUBLIC_MAPBOX_TOKEN }}
+          EOF
+
+      - name: Deploy to Cloud Run
+        env:
+          SERVICE: ${{ secrets.CLOUD_RUN_SERVICE }}
+          REGION: ${{ secrets.CLOUD_RUN_REGION }}
+          CLOUD_RUN_IMAGE: ${{ secrets.CLOUD_RUN_IMAGE }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          IMAGE="${CLOUD_RUN_IMAGE:-ghcr.io/${REPOSITORY}:latest}"
+          gcloud run deploy "$SERVICE" \
+            --region "$REGION" \
+            --platform managed \
+            --image "$IMAGE" \
+            --allow-unauthenticated \
+            --env-vars-file cloudrun.env
