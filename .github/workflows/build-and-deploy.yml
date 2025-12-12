@@ -43,16 +43,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up gcloud auth (Workload Identity Federation)
-        uses: google-github-actions/auth@v1
+      - name: Authenticate to Google Cloud via Workload Identity
+        uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+          workload_identity_provider: projects/${{ secrets.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/gh-pool/providers/gh-provider
+          service_account: ci-runner@pittsburgh-in-progress.iam.gserviceaccount.com
 
-      - name: Install gcloud SDK
-        uses: google-github-actions/setup-gcloud@v1
-        with:
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
 
       - name: Write Cloud Run env vars from GitHub Secrets
         run: |
